@@ -3,7 +3,7 @@ import { createEvents, type EventAttributes } from "ics";
 
 const cache = new Map<string, { expires: number; value: Promise<unknown> }>();
 
-export const TIMETABLE_TTL = 15 * 60 * 1000; // ms
+export const TIMETABLE_TTL = 15 * 60 * 1000;
 export const CLASSES_TTL = 7 * 24 * 60 * 60 * 1000;
 
 async function fetchJson<T>(url: URL): Promise<T> {
@@ -41,12 +41,12 @@ interface RawEntry {
   ids: number[];
   duration: { start: string; end: string };
   status: string;
-  position1: { current: { displayName: string } }[];
+  position1: { current: { longName: string } }[];
   position2: { current: { displayName: string } }[];
   position3: { current: { displayName: string } }[];
 }
 
-interface Lesson {
+export interface Lesson {
   id: number;
   start: string;
   end: string;
@@ -54,6 +54,15 @@ interface Lesson {
   teacher: string | undefined;
   room: string | undefined;
   cancelled: boolean;
+}
+
+interface AppData {
+  currentSchoolYear: { dateRange: { start: string; end: string } };
+}
+
+export async function getCurrentSchoolYearRange(): Promise<{ start: string; end: string }> {
+  const data = await get<AppData>("/app/data", {}, CLASSES_TTL);
+  return data.currentSchoolYear.dateRange;
 }
 
 export async function getLessons(classId: number, start: string, end: string): Promise<Lesson[]> {
@@ -73,7 +82,7 @@ export async function getLessons(classId: number, start: string, end: string): P
     id: entry.ids[0],
     start: entry.duration.start,
     end: entry.duration.end,
-    subject: entry.position1[0]?.current.displayName,
+    subject: entry.position1[0]?.current.longName,
     teacher: entry.position2[0]?.current.displayName,
     room: entry.position3[0]?.current.displayName,
     cancelled: entry.status !== "REGULAR",
@@ -109,7 +118,27 @@ export function buildIcs(lessons: Lesson[]) {
   return value!;
 }
 
+export function matchesFilter(subject: string | undefined, filters: string[]): boolean {
+  if (!subject) return false;
 
-function isValidDate(value: unknown): value is string {
-  return typeof value === "string" && /^\d{4}-\d{2}$/.test(value);
+  return filters.includes(subject);
+}
+
+const SEMESTER_2_STARTS: Record<string, string> = {
+  "2025-09-15": "2026-02-02",
+  "2026-09-21": "2027-02-08",
+};
+
+export function getSemester2Start(schoolYearStart: string): string | null {
+  return SEMESTER_2_STARTS[schoolYearStart] ?? null;
+}
+
+export type Semester = "1" | "2" | "full";
+
+export function classifySemester(dates: string[], semester2Start: string | null): Semester {
+  if (semester2Start === null) return "full";
+  const hasFirst = dates.some((date) => date < semester2Start);
+  const hasSecond = dates.some((date) => date >= semester2Start);
+  if (hasFirst && hasSecond) return "full";
+  return hasFirst ? "1" : "2";
 }
